@@ -1,0 +1,6 @@
+{
+  "name": "Control Ganadero Pro",
+  "description": "Una aplicación web para que los ganaderos gestionen su ganado, registren vacunas, tratamientos, peso, ventas y exporten informes. Funciona sin conexión y guarda todos los datos en su dispositivo. Para instalarla en Android, busque la opción 'Agregar a la pantalla de inicio' en el menú de su navegador.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}

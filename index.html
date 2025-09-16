@@ -1,0 +1,1859 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Control Ganadero Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/localforage@1.10.0/dist/localforage.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf-autotable.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <!-- Babel for in-browser JSX/TSX transformation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#166534">
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@18.3.1",
+    "react-dom/client": "https://esm.sh/react-dom@18.3.1/client"
+  }
+}
+</script>
+</head>
+  <body class="bg-gray-100">
+    <div id="root"></div>
+    <script type="text/babel" data-type="module">
+// =======================================================
+// INICIO: CÓDIGO DE LA APLICACIÓN INTEGRADO
+// =======================================================
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+
+// --- types.ts ---
+var AnimalTipo;
+(function (AnimalTipo) {
+    AnimalTipo["VACA_LECHERA"] = "Vaca Lechera";
+    AnimalTipo["TORO"] = "Toro";
+    AnimalTipo["TERNERO"] = "Ternero/a";
+    AnimalTipo["NOVILLO"] = "Novillo/a";
+})(AnimalTipo || (AnimalTipo = {}));
+var VentaTipo;
+(function (VentaTipo) {
+    VentaTipo["ANIMAL"] = "Animal";
+    VentaTipo["LECHE"] = "Leche";
+    VentaTipo["DERIVADOS_LACTEOS"] = "Derivados Lácteos";
+    VentaTipo["OTRO"] = "Otro";
+})(VentaTipo || (VentaTipo = {}));
+var UserRole;
+(function (UserRole) {
+    UserRole["ADMIN"] = "Administrador";
+    UserRole["TECNICO"] = "Técnico";
+    UserRole["VENDEDOR"] = "Vendedor";
+})(UserRole || (UserRole = {}));
+
+
+// --- CONSTANTS ---
+const vacunasColombia = [
+    "Fiebre Aftosa", 
+    "Brucelosis (Cepa 19 o RB51)", 
+    "Rabia Bovina", 
+    "Carbón Sintomático (Pierna Negra)", 
+    "Edema Maligno", 
+    "Septicemia Hemorrágica", 
+    "Leptospirosis", 
+    "IBR (Rinotraqueitis Infecciosa Bovina)", 
+    "DVB (Diarrea Viral Bovina)", 
+    "Otra"
+];
+const CATTLE_KEY = 'ganado_data';
+const SALES_KEY = 'ventas_data';
+const USERS_KEY = 'users_data';
+const INVENTORY_KEY = 'inventario_data';
+const SESSION_KEY = 'session_user';
+
+
+// --- services/storageService.ts ---
+const storageService = {
+  async getAnimales() {
+    return (await localforage.getItem(CATTLE_KEY)) || [];
+  },
+  async saveAnimales(animales) {
+    await localforage.setItem(CATTLE_KEY, animales);
+  },
+  async getVentas() {
+    return (await localforage.getItem(SALES_KEY)) || [];
+  },
+  async saveVentas(ventas) {
+    await localforage.setItem(SALES_KEY, ventas);
+  },
+  async getUsers() {
+    return (await localforage.getItem(USERS_KEY)) || [];
+  },
+  async saveUsers(users) {
+    await localforage.setItem(USERS_KEY, users);
+  },
+  async getInventario() {
+    return (await localforage.getItem(INVENTORY_KEY)) || [];
+  },
+  async saveInventario(inventario) {
+    await localforage.setItem(INVENTORY_KEY, inventario);
+  },
+  getSession() {
+    try {
+      const userJson = sessionStorage.getItem(SESSION_KEY);
+      return userJson ? JSON.parse(userJson) : null;
+    } catch {
+      return null;
+    }
+  },
+  saveSession(user) {
+    sessionStorage.setItem(SESSION_KEY, JSON.stringify(user));
+  },
+  clearSession() {
+    sessionStorage.removeItem(SESSION_KEY);
+  },
+};
+
+// --- services/reportService.ts ---
+const generarPDF = (titulo, cabeceras, datos, nombreArchivo) => {
+  if (!datos || datos.length === 0) {
+    alert('No hay datos disponibles para generar el informe PDF.');
+    return;
+  }
+  try {
+    const { jsPDF } = window.jspdf;
+    if (!jsPDF) {
+        throw new Error("La librería jsPDF no está disponible.");
+    }
+    const doc = new jsPDF();
+    doc.text(titulo, 14, 15);
+    doc.autoTable({
+      head: [cabeceras],
+      body: datos,
+      startY: 20,
+      theme: 'grid',
+      headStyles: { fillColor: [22, 101, 52] },
+    });
+    doc.save(nombreArchivo);
+  } catch(error) {
+      console.error("Error al generar PDF:", error);
+      alert("Ocurrió un error al generar el PDF. Revise la consola para más detalles.");
+  }
+};
+const generarExcel = (datos, nombreHoja, nombreArchivo) => {
+  const worksheet = XLSX.utils.json_to_sheet(datos);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, nombreHoja);
+  XLSX.writeFile(workbook, nombreArchivo);
+};
+const reportService = {
+  exportarInventarioPDF(animales) {
+    const cabeceras = ['N° Arete', 'Nombre', 'Tipo', 'Sexo', 'Raza', 'F. Nacimiento', 'Cód. Finca'];
+    const datos = animales.map(a => [a.numeroArete, a.nombre, a.tipo, a.sexo, a.raza, a.fechaNacimiento, a.codigoFinca]);
+    generarPDF('Inventario de Ganado', cabeceras, datos, 'inventario_ganado.pdf');
+  },
+  exportarInventarioExcel(animales) {
+    const datos = animales.map(a => ({
+      'Número de Arete': a.numeroArete,
+      'Nombre': a.nombre,
+      'Tipo': a.tipo,
+      'Sexo': a.sexo,
+      'Raza': a.raza,
+      'Código de Finca (RUP)': a.codigoFinca,
+      'Fecha de Nacimiento': a.fechaNacimiento,
+      'URL Imagen': a.imagenUrl,
+      'Vacunas_Total': a.vacunas.length,
+      'Tratamientos_Total': a.tratamientos.length,
+      'Notas Generales': a.notasGenerales || '',
+      'Notas ICA': a.notasICA || '',
+    }));
+    generarExcel(datos, 'Inventario', 'inventario_ganado.xlsx');
+  },
+  exportarVentasExcel(ventas) {
+    const datos = ventas.map(v => ({
+      'Fecha': v.fecha,
+      'Tipo de Venta': v.tipo,
+      'Descripción / Producto': v.descripcion,
+      'Detalles': v.tipo === VentaTipo.LECHE ? `Modalidad: ${v.subtipoLeche || 'Total'}`: '',
+      'Cantidad': v.cantidad,
+      'Unidad': v.tipo === VentaTipo.LECHE ? 'Lts' : (v.tipo === VentaTipo.DERIVADOS_LACTEOS ? 'Uds/Kg' : 'N/A'),
+      'Precio Unitario ($)': v.precioUnitario,
+      'Monto Total ($)': v.monto,
+    }));
+    generarExcel(datos, 'Ventas Generales', 'informe_ventas_general.xlsx');
+  },
+  exportarVentasLechePDF(ventas) {
+      const ventasLeche = ventas.filter(v => v.tipo === VentaTipo.LECHE);
+      generarPDF('Informe de Ventas de Leche', 
+        ['Fecha', 'Modalidad', 'Cantidad (Lts)', 'Precio/Lt ($)', 'Monto ($)'],
+        ventasLeche.map(v => [v.fecha, v.subtipoLeche || 'Total', v.cantidad?.toFixed(2) || 'N/A', v.precioUnitario?.toFixed(2) || 'N/A', v.monto.toFixed(2)]),
+        'informe_ventas_leche.pdf'
+      );
+  },
+  exportarVentasDerivadosPDF(ventas) {
+      const ventasDerivados = ventas.filter(v => v.tipo === VentaTipo.DERIVADOS_LACTEOS);
+      generarPDF('Informe de Ventas de Derivados',
+        ['Fecha', 'Producto', 'Cantidad', 'Precio/Ud ($)', 'Monto ($)'],
+        ventasDerivados.map(v => [v.fecha, v.descripcion, v.cantidad || 'N/A', v.precioUnitario?.toFixed(2) || 'N/A', v.monto.toFixed(2)]),
+        'informe_ventas_derivados.pdf'
+      );
+  },
+  exportarNovedadesAnimalPDF(animal) {
+    try {
+        const { jsPDF } = window.jspdf;
+        if (!jsPDF) {
+            throw new Error("La librería jsPDF no está disponible.");
+        }
+        const doc = new jsPDF();
+
+        doc.setFontSize(18);
+        doc.text(`Reporte de Novedades: ${animal.nombre}`, 14, 22);
+        doc.setFontSize(11);
+        doc.text(`ID/Arete: ${animal.numeroArete}`, 14, 32);
+
+        let lastY = 40;
+
+        const addSection = (title, headers, data) => {
+            if (doc.autoTable.previous && doc.autoTable.previous.finalY) {
+               lastY = doc.autoTable.previous.finalY + 15;
+            }
+            
+            doc.setFontSize(14).text(title, 14, lastY);
+
+            if (data.length > 0) {
+                doc.autoTable({
+                    head: [headers],
+                    body: data,
+                    startY: lastY + 5,
+                    theme: 'grid',
+                    headStyles: { fillColor: [22, 101, 52] },
+                });
+            } else {
+                doc.setFontSize(10).text("No hay registros.", 14, lastY + 10);
+                // Ensure lastY is updated even if there's no table
+                lastY += 15;
+                doc.autoTable.previous = { finalY: lastY };
+            }
+        };
+        
+        const vacunasData = animal.vacunas.map(v => [v.fecha, v.tipo, v.producto, v.proximaDosis || 'N/A', v.notas || '']);
+        addSection('Vacunación', ['Fecha', 'Tipo', 'Producto', 'Próxima Dosis', 'Notas'], vacunasData);
+
+        const tratamientosData = animal.tratamientos.map(t => [t.fecha, t.enfermedad, t.medicamento, t.dosis, t.notas || '']);
+        addSection('Tratamientos', ['Fecha', 'Condición', 'Medicamento', 'Dosis', 'Notas'], tratamientosData);
+        
+        const medicionesData = animal.mediciones.map(m => [m.fecha, `${m.pesoKg} kg`, `${m.alturaCm} cm`, m.notas || '']);
+        addSection('Peso y Talla', ['Fecha', 'Peso', 'Altura', 'Notas'], medicionesData);
+
+        doc.save(`novedades_${animal.numeroArete.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`);
+    } catch (error) {
+       console.error("Error al generar PDF de novedades:", error);
+       alert("Ocurrió un error al generar el PDF de novedades. Revise la consola para más detalles.");
+    }
+  },
+  exportarInventarioMaterialesExcel(inventario) {
+    const datos = inventario.map(item => ({
+      'Fecha': item.fecha,
+      'Material': item.nombre,
+      'Factura/Referencia': item.factura,
+      'Cantidad': item.cantidad,
+      'Costo Total ($)': item.costo,
+      'Costo Unitario ($)': item.cantidad > 0 ? (item.costo / item.cantidad) : 0,
+      'Notas': item.notas,
+    }));
+    generarExcel(datos, 'Inventario Materiales', 'inventario_materiales.xlsx');
+  },
+};
+
+
+// --- components/Icons.tsx ---
+const CowIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M4 14v-2.5c0 -1.453 1.047 -2.5 2.5 -2.5h1c.828 0 1.5 .672 1.5 1.5v3.5h-5z' }), React.createElement('path', { d: 'M16 11.5c0 -.828 .672 -1.5 1.5 -1.5h1c1.453 0 2.5 1.047 2.5 2.5v2.5h-5v-3.5z' }), React.createElement('path', { d: 'M11.5 20h1' }), React.createElement('path', { d: 'M10 17h4' }), React.createElement('path', { d: 'M12 4c1.93 0 3.682 .89 4.88 2.373c.12 .147 .23 .302 .329 .46' }), React.createElement('path', { d: 'M12 4c-1.93 0 -3.682 .89 -4.88 2.373c-.12 .147 -.23 .302 -.329 .46' }), React.createElement('path', { d: 'M12 4v2' }), React.createElement('path', { d: 'M3 18.5v-2.15c0 -1.44 1.12 -2.583 2.571 -2.583c.286 0 .571 .046 .84 .135' }), React.createElement('path', { d: 'M21 18.5v-2.15c0 -1.44 -1.12 -2.583 -2.571 -2.583c-.286 0 -.571 .046 -.84 .135' })) );
+const PlusIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('line', { x1: '12', y1: '5', x2: '12', y2: '19' }), React.createElement('line', { x1: '5', y1: '12', x2: '19', y2: '12' })) );
+const XIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('line', { x1: '18', y1: '6', x2: '6', y2: '18' }), React.createElement('line', { x1: '6', y1: '6', x2: '18', y2: '18' })) );
+const ChevronLeftIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('polyline', { points: '15 18 9 12 15 6' })) );
+const DollarSignIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('line', { x1: '12', y1: '1', x2: '12', y2: '23' }), React.createElement('path', { d: 'M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6' })) );
+const FileTextIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z' }), React.createElement('polyline', { points: '14 2 14 8 20 8' }), React.createElement('line', { x1: '16', y1: '13', x2: '8', y2: '13' }), React.createElement('line', { x1: '16', y1: '17', x2: '8', y2: '17' }), React.createElement('line', { x1: '10', y1: '9', x2: '8', y2: '9' })) );
+const SyringeIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'm18 2 4 4' }), React.createElement('path', { d: 'm17 7 3-3' }), React.createElement('path', { d: 'M19 9 8.7 19.3c-1 1-2.5 1-3.4 0l-.6-.6c-1-1-1-2.5 0-3.4L15 5' }), React.createElement('path', { d: 'm9 11 4 4' }), React.createElement('path', { d: 'm5 19-3 3' }), React.createElement('path', { d: 'm12.4 3.4 1.2 1.2' })) );
+const ScaleIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'm16 16 3-8 3 8c-.8.9-2 1.5-3.5 1.5s-2.7-.6-3.5-1.5Z' }), React.createElement('path', { d: 'm2 16 3-8 3 8c-.8.9-2 1.5-3.5 1.5S2.8 16.9 2 16Z' }), React.createElement('path', { d: 'M7.5 8h9' }), React.createElement('path', { d: 'M12 3v5' }), React.createElement('path', { d: 'M3 16h18' })) );
+const HomeIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'm3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' }), React.createElement('polyline', { points: '9 22 9 12 15 12 15 22' })) );
+const HeartPulseIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z' }), React.createElement('path', { d: 'M3.22 12H9.5l.7-1 2.1 4.4 2.1-4.4.7 1h6.22' })) );
+const DropletIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M12 22a7 7 0 0 0 7-7c0-2-1-3.9-3-5.5s-3.5-4-4-6.5c-.5 2.5-2 4.9-4 6.5C5 11.1 4 13 4 15a7 7 0 0 0 7 7z' })) );
+const CheeseIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M20.3 6.7a2.4 2.4 0 0 0-2.2-1.7H5.9a2.4 2.4 0 0 0-2.2 1.7L2 12h20l-1.7-5.3z' }), React.createElement('path', { d: 'M22 13H2a1 1 0 0 0-1 1v4a1 1 0 0 0 1 1h20a1 1 0 0 0 1-1v-4a1 1 0 0 0-1-1z' }), React.createElement('path', { d: 'M6 17.5a.5.5 0 0 0 0-1 .5.5 0 0 0 0 1z' }), React.createElement('path', { d: 'M10 17.5a.5.5 0 0 0 0-1 .5.5 0 0 0 0 1z' }), React.createElement('path', { d: 'M14 17.5a.5.5 0 0 0 0-1 .5.5 0 0 0 0 1z' }), React.createElement('path', { d: 'M18 17.5a.5.5 0 0 0 0-1 .5.5 0 0 0 0 1z' })) );
+const HelpCircleIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('circle', { cx: '12', cy: '12', r: '10' }), React.createElement('path', { d: 'M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3' }), React.createElement('line', { x1: '12', y1: '17', x2: '12.01', y2: '17' })) );
+const LogOutIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4' }), React.createElement('polyline', { points: '16 17 21 12 16 7' }), React.createElement('line', { x1: '21', y1: '12', x2: '9', y2: '12' })) );
+const UsersIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2' }), React.createElement('circle', { cx: '9', cy: '7', r: '4' }), React.createElement('path', { d: 'M22 21v-2a4 4 0 0 0-3-3.87' }), React.createElement('path', { d: 'M16 3.13a4 4 0 0 1 0 7.75' })) );
+const DownloadIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }), React.createElement('polyline', { points: '7 10 12 15 17 10' }), React.createElement('line', { x1: '12', y1: '15', x2: '12', y2: '3' })) );
+const UploadIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' }), React.createElement('polyline', { points: '17 8 12 3 7 8' }), React.createElement('line', { x1: '12', y1: '3', x2: '12', y2: '15' })) );
+const BoxIcon = ({ className }) => ( React.createElement('svg', { xmlns: 'http://www.w3.org/2000/svg', width: '24', height: '24', viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: '2', strokeLinecap: 'round', strokeLinejoin: 'round', className: className }, React.createElement('path', { d: 'M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z' }), React.createElement('polyline', { points: '3.27 6.96 12 12.01 20.73 6.96' }), React.createElement('line', { x1: '12', y1: '22.08', x2: '12', y2: '12' })) );
+
+
+// --- App.tsx ---
+var Page;
+(function (Page) {
+    Page["DASHBOARD"] = "Dashboard";
+    Page["ANIMALES"] = "Animales";
+    Page["VENTAS"] = "Ventas";
+    Page["REPORTES"] = "Reportes";
+    Page["INVENTARIO"] = "Inventario";
+    Page["USUARIOS"] = "Usuarios";
+    Page["AYUDA"] = "Ayuda";
+})(Page || (Page = {}));
+
+const Toast = ({ message, onDismiss }) => {
+  React.useEffect(() => {
+    const timer = setTimeout(onDismiss, 3000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    React.createElement('div', { className: "fixed bottom-5 right-5 bg-green-700 text-white py-2 px-4 rounded-lg shadow-lg animate-bounce z-50" },
+      message
+    )
+  );
+};
+
+const Modal = ({ isOpen, onClose, title, children }) => {
+  if (!isOpen) return null;
+
+  return (
+    React.createElement('div', { className: "fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50 p-4" },
+      React.createElement('div', { className: "bg-white rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto" },
+        React.createElement('div', { className: "flex justify-between items-center p-4 border-b" },
+          React.createElement('h3', { className: "text-xl font-semibold text-gray-800" }, title),
+          React.createElement('button', { onClick: onClose, className: "text-gray-500 hover:text-gray-800" },
+            React.createElement(XIcon, { className: "w-6 h-6" })
+          )
+        ),
+        React.createElement('div', { className: "p-4" }, children)
+      )
+    )
+  );
+};
+
+const Input = ({ label, ...props }) => (
+  React.createElement('div', null,
+    React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, label),
+    React.createElement('input', { ...props, className: "w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500" })
+  )
+);
+
+const Select = ({ label, children, ...props }) => (
+    React.createElement('div', null,
+        React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, label),
+        React.createElement('select', { ...props, className: "w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500 bg-white" },
+            children
+        )
+    )
+);
+
+const Textarea = ({ label, ...props }) => (
+    React.createElement('div', null,
+        React.createElement('label', { className: "block text-sm font-medium text-gray-700 mb-1" }, label),
+        React.createElement('textarea', { ...props, rows: 3, className: "w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-green-500 focus:border-green-500" })
+    )
+);
+
+const AnimalForm = ({ onSave, initialData, onClose }) => {
+    const [animal, setAnimal] = React.useState({
+        nombre: '', numeroArete: '', tipo: AnimalTipo.VACA_LECHERA, raza: '', fechaNacimiento: '', notasGenerales: '', notasICA: '',
+        sexo: 'Hembra', codigoFinca: '', imagenUrl: ''
+    });
+
+    React.useEffect(() => {
+        if (initialData) {
+            setAnimal({ 
+                ...initialData, 
+                notasGenerales: initialData.notasGenerales || '', 
+                notasICA: initialData.notasICA || '',
+                sexo: initialData.sexo || 'Hembra',
+                codigoFinca: initialData.codigoFinca || '',
+                imagenUrl: initialData.imagenUrl || ''
+            });
+        }
+    }, [initialData]);
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setAnimal(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        const finalAnimal = {
+            id: initialData?.id || Date.now().toString(),
+            ...animal,
+            vacunas: initialData?.vacunas || [],
+            tratamientos: initialData?.tratamientos || [],
+            mediciones: initialData?.mediciones || [],
+        };
+        onSave(finalAnimal);
+        onClose();
+    };
+
+    return (
+        React.createElement('form', { onSubmit: handleSubmit, className: "space-y-4" },
+            React.createElement(Input, { label: "Nombre / Identificador", name: "nombre", value: animal.nombre, onChange: handleChange, required: true }),
+            React.createElement(Input, { label: "Número de Arete / ID", name: "numeroArete", value: animal.numeroArete, onChange: handleChange, required: true }),
+            React.createElement(Select, { label: "Tipo de Animal", name: "tipo", value: animal.tipo, onChange: handleChange },
+                Object.values(AnimalTipo).map(tipo => React.createElement('option', { key: tipo, value: tipo }, tipo))
+            ),
+            React.createElement(Input, { label: "Raza", name: "raza", value: animal.raza, onChange: handleChange }),
+            React.createElement(Select, { label: "Sexo", name: "sexo", value: animal.sexo, onChange: handleChange },
+                React.createElement('option', { value: "Hembra" }, "Hembra"),
+                React.createElement('option', { value: "Macho" }, "Macho")
+            ),
+            React.createElement(Input, { label: "Código de Finca (RUP)", name: "codigoFinca", value: animal.codigoFinca, onChange: handleChange }),
+            React.createElement(Input, { label: "Fecha de Nacimiento", name: "fechaNacimiento", type: "date", value: animal.fechaNacimiento, onChange: handleChange, required: true }),
+            React.createElement(Input, { label: "URL de la Imagen", name: "imagenUrl", type: "url", value: animal.imagenUrl, onChange: handleChange, placeholder: "https://ejemplo.com/foto.png" }),
+            React.createElement(Textarea, { label: "Notas Generales", name: "notasGenerales", value: animal.notasGenerales, onChange: handleChange }),
+            React.createElement(Textarea, { label: "Notas para Revisión ICA (Opcional)", name: "notasICA", value: animal.notasICA, onChange: handleChange }),
+            React.createElement('div', { className: "flex justify-end space-x-2 pt-4" },
+                React.createElement('button', { type: "button", onClick: onClose, className: "px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300" }, "Cancelar"),
+                React.createElement('button', { type: "submit", className: "px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800" }, initialData ? 'Guardar Cambios' : 'Crear Animal')
+            )
+        )
+    );
+};
+
+const AnimalDetailView = ({ animal, onBack, onUpdateAnimal, onDeleteSubRecord, currentUser }) => {
+    const [showForm, setShowForm] = React.useState(null);
+    const [formData, setFormData] = React.useState({});
+    const canEdit = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.TECNICO;
+    
+    const handleSubFormChange = (e) => {
+        setFormData(prev => ({ ...prev, [e.target.name]: e.target.value }));
+    };
+
+    const handleSaveSubForm = (e) => {
+        e.preventDefault();
+        let newRecord = { id: Date.now().toString(), ...formData };
+        let updatedAnimal;
+
+        switch (showForm) {
+            case 'vacuna':
+                if (newRecord.tipo === 'Otra') {
+                  newRecord.tipo = newRecord.tipoOtro || 'Otra (sin especificar)';
+                }
+                delete newRecord.tipoOtro;
+                updatedAnimal = { ...animal, vacunas: [...animal.vacunas, newRecord].sort((a,b) => b.fecha.localeCompare(a.fecha)) };
+                break;
+            case 'tratamiento':
+                updatedAnimal = { ...animal, tratamientos: [...animal.tratamientos, newRecord].sort((a,b) => b.fecha.localeCompare(a.fecha)) };
+                break;
+            case 'medicion':
+                updatedAnimal = { ...animal, mediciones: [...animal.mediciones, { ...newRecord, pesoKg: parseFloat(newRecord.pesoKg), alturaCm: parseFloat(newRecord.alturaCm) }].sort((a,b) => b.fecha.localeCompare(a.fecha)) };
+                break;
+            default: return;
+        }
+        onUpdateAnimal(updatedAnimal);
+        setShowForm(null);
+        setFormData({});
+    };
+
+    const renderSubForm = () => {
+        if (!showForm) return null;
+        return (
+            React.createElement('div', { className: "mt-4 p-4 border rounded-lg bg-gray-50" },
+                 React.createElement('h4', { className: "text-lg font-semibold mb-2 text-gray-700" }, `Registrar Nuevo ${showForm === 'vacuna' ? 'Registro de Vacunación' : showForm === 'tratamiento' ? 'Tratamiento' : 'Medición'}`),
+                React.createElement('form', { onSubmit: handleSaveSubForm, className: "space-y-3" },
+                    React.createElement(Input, { label: "Fecha", name: "fecha", type: "date", required: true, onChange: handleSubFormChange, value: formData.fecha || '' }),
+                    showForm === 'vacuna' && React.createElement(React.Fragment, null,
+                        React.createElement(Select, { label: "Tipo de Vacuna (Norma Colombiana)", name: "tipo", required: true, onChange: handleSubFormChange, value: formData.tipo || '' },
+                           React.createElement('option', { value: "", disabled: true }, "Seleccione una vacuna"),
+                           vacunasColombia.map(v => React.createElement('option', { key: v, value: v}, v))
+                        ),
+                        formData.tipo === 'Otra' && React.createElement(Input, { label: "Especificar otra vacuna", name: "tipoOtro", required: true, onChange: handleSubFormChange, value: formData.tipoOtro || '' }),
+                        React.createElement(Input, { label: "Producto Utilizado", name: "producto", required: true, onChange: handleSubFormChange, value: formData.producto || '' }),
+                        React.createElement(Input, { label: "Próxima Dosis (Opcional)", name: "proximaDosis", type: "date", onChange: handleSubFormChange, value: formData.proximaDosis || '' }),
+                    ),
+                     showForm === 'tratamiento' && React.createElement(React.Fragment, null,
+                        React.createElement(Input, { label: "Enfermedad / Condición", name: "enfermedad", required: true, onChange: handleSubFormChange, value: formData.enfermedad || '' }),
+                        React.createElement(Input, { label: "Medicamento", name: "medicamento", required: true, onChange: handleSubFormChange, value: formData.medicamento || '' }),
+                        React.createElement(Input, { label: "Dosis", name: "dosis", required: true, onChange: handleSubFormChange, value: formData.dosis || '' }),
+                    ),
+                     showForm === 'medicion' && React.createElement(React.Fragment, null,
+                        React.createElement(Input, { label: "Peso (Kg)", name: "pesoKg", type: "number", step: "0.1", required: true, onChange: handleSubFormChange, value: formData.pesoKg || '' }),
+                        React.createElement(Input, { label: "Altura (cm)", name: "alturaCm", type: "number", step: "1", required: true, onChange: handleSubFormChange, value: formData.alturaCm || '' }),
+                    ),
+                    React.createElement(Textarea, { label: "Notas", name: "notas", onChange: handleSubFormChange, value: formData.notas || '' }),
+                     React.createElement('div', { className: "flex justify-end space-x-2 pt-2" },
+                        React.createElement('button', { type: "button", onClick: () => setShowForm(null), className: "px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300" }, "Cancelar"),
+                        React.createElement('button', { type: "submit", className: "px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800" }, "Guardar")
+                    )
+                )
+            )
+        );
+    };
+
+    return (
+        React.createElement('div', null,
+            React.createElement('div', { className: "flex justify-between items-center mb-4 flex-wrap gap-2" },
+                React.createElement('button', { onClick: onBack, className: "flex items-center text-green-700 font-semibold hover:underline" },
+                    React.createElement(ChevronLeftIcon, { className: "w-5 h-5 mr-1"}), " Volver a la lista"
+                ),
+                (currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.TECNICO) && (
+                    React.createElement('button', { onClick: () => reportService.exportarNovedadesAnimalPDF(animal),
+                        className: "flex items-center bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-300"
+                    },
+                        React.createElement(FileTextIcon, { className: "w-5 h-5 mr-2" }),
+                        "Generar Reporte PDF"
+                    )
+                )
+            ),
+            
+            animal.imagenUrl && (
+                React.createElement('div', { className: "mb-6" },
+                    React.createElement('img', { src: animal.imagenUrl, alt: animal.nombre, className: "w-full h-64 object-cover rounded-lg shadow-md bg-gray-200" })
+                )
+            ),
+
+            React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md" },
+                React.createElement('h2', { className: "text-2xl font-bold text-gray-800" }, animal.nombre),
+                React.createElement('p', { className: "text-gray-600" }, `Arete: ${animal.numeroArete}`),
+                React.createElement('div', { className: "mt-4 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm" },
+                    React.createElement('div', null, React.createElement('span', { className: "font-semibold" }, "Tipo: "), animal.tipo),
+                    React.createElement('div', null, React.createElement('span', { className: "font-semibold" }, "Raza: "), animal.raza),
+                    React.createElement('div', null, React.createElement('span', { className: "font-semibold" }, "Nacimiento: "), animal.fechaNacimiento),
+                    React.createElement('div', null, React.createElement('span', { className: "font-semibold" }, "Sexo: "), animal.sexo),
+                    React.createElement('div', { className: "col-span-2 md:col-span-1" }, React.createElement('span', { className: "font-semibold" }, "Cód. Finca: "), animal.codigoFinca)
+                ),
+                animal.notasGenerales && React.createElement('p', { className: "mt-4 text-gray-700 bg-yellow-50 p-3 rounded-md" }, React.createElement('span', { className: "font-semibold" }, "Notas Generales: "), animal.notasGenerales),
+                animal.notasICA && React.createElement('p', { className: "mt-4 text-gray-700 bg-blue-50 p-3 rounded-md" }, React.createElement('span', { className: "font-semibold" }, "Notas ICA: "), animal.notasICA)
+            ),
+
+            React.createElement('div', { className: "mt-6 space-y-6" },
+                // Vacunas
+                React.createElement('div', { className: "bg-white p-4 rounded-lg shadow-md" },
+                    React.createElement('div', { className: "flex justify-between items-center mb-2" },
+                        React.createElement('h3', { className: "text-xl font-semibold text-gray-700 flex items-center" }, React.createElement(SyringeIcon, { className: "w-5 h-5 mr-2"}), "Vacunación"),
+                        canEdit && React.createElement('button', { onClick: () => {setShowForm('vacuna'); setFormData({fecha: new Date().toISOString().split('T')[0]})}, className: "flex items-center px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold hover:bg-blue-200" }, React.createElement(PlusIcon, { className: "w-4 h-4 mr-1"}), "Agregar")
+                    ),
+                    showForm === 'vacuna' && renderSubForm(),
+                    React.createElement('div', { className: "space-y-2 mt-2" },
+                        animal.vacunas.length > 0 ? animal.vacunas.map(v => (
+                            React.createElement('div', { key: v.id, className: "p-3 border rounded-md bg-gray-50 flex justify-between items-start" },
+                                React.createElement('div', null,
+                                  React.createElement('p', { className: "font-semibold" }, `${v.tipo} - ${v.producto}`),
+                                  React.createElement('p', { className: "text-sm text-gray-600" }, `Fecha: ${v.fecha} | Próxima: ${v.proximaDosis || 'N/A'}`),
+                                  v.notas && React.createElement('p', { className: "text-sm text-gray-500 mt-1" }, `Notas: ${v.notas}`)
+                                ),
+                                canEdit && React.createElement('button', { onClick: () => onDeleteSubRecord('vacuna', v.id), className: "p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-100 transition-colors" }, React.createElement(XIcon, { className: "w-4 h-4" }))
+                            )
+                        )) : React.createElement('p', { className: "text-gray-500 text-center p-4" }, "No hay registros de vacunas.")
+                    )
+                ),
+
+                // Tratamientos
+                React.createElement('div', { className: "bg-white p-4 rounded-lg shadow-md" },
+                     React.createElement('div', { className: "flex justify-between items-center mb-2" },
+                        React.createElement('h3', { className: "text-xl font-semibold text-gray-700 flex items-center" }, React.createElement(HeartPulseIcon, { className: "w-5 h-5 mr-2"}), "Tratamientos"),
+                        canEdit && React.createElement('button', { onClick: () => {setShowForm('tratamiento'); setFormData({fecha: new Date().toISOString().split('T')[0]})}, className: "flex items-center px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold hover:bg-blue-200" }, React.createElement(PlusIcon, { className: "w-4 h-4 mr-1"}), "Agregar")
+                    ),
+                    showForm === 'tratamiento' && renderSubForm(),
+                    React.createElement('div', { className: "space-y-2 mt-2" },
+                        animal.tratamientos.length > 0 ? animal.tratamientos.map(t => (
+                            React.createElement('div', { key: t.id, className: "p-3 border rounded-md bg-gray-50 flex justify-between items-start" },
+                                React.createElement('div', null,
+                                  React.createElement('p', { className: "font-semibold" }, `${t.enfermedad}: ${t.medicamento} (${t.dosis})`),
+                                  React.createElement('p', { className: "text-sm text-gray-600" }, `Fecha: ${t.fecha}`),
+                                  t.notas && React.createElement('p', { className: "text-sm text-gray-500 mt-1" }, `Notas: ${t.notas}`)
+                                ),
+                                canEdit && React.createElement('button', { onClick: () => onDeleteSubRecord('tratamiento', t.id), className: "p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-100 transition-colors" }, React.createElement(XIcon, { className: "w-4 h-4" }))
+                            )
+                        )) : React.createElement('p', { className: "text-gray-500 text-center p-4" }, "No hay registros de tratamientos.")
+                    )
+                ),
+
+                 // Mediciones
+                React.createElement('div', { className: "bg-white p-4 rounded-lg shadow-md" },
+                    React.createElement('div', { className: "flex justify-between items-center mb-2" },
+                        React.createElement('h3', { className: "text-xl font-semibold text-gray-700 flex items-center" }, React.createElement(ScaleIcon, { className: "w-5 h-5 mr-2"}), "Peso y Talla"),
+                        canEdit && React.createElement('button', { onClick: () => {setShowForm('medicion'); setFormData({fecha: new Date().toISOString().split('T')[0]})}, className: "flex items-center px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-semibold hover:bg-blue-200" }, React.createElement(PlusIcon, { className: "w-4 h-4 mr-1"}), "Agregar")
+                    ),
+                    showForm === 'medicion' && renderSubForm(),
+                    React.createElement('div', { className: "space-y-2 mt-2" },
+                        animal.mediciones.length > 0 ? animal.mediciones.map(m => (
+                            React.createElement('div', { key: m.id, className: "p-3 border rounded-md bg-gray-50 flex justify-between items-start" },
+                                React.createElement('div', null,
+                                  React.createElement('p', { className: "font-semibold" }, `Peso: ${m.pesoKg} kg | Altura: ${m.alturaCm} cm`),
+                                  React.createElement('p', { className: "text-sm text-gray-600" }, `Fecha: ${m.fecha}`),
+                                  m.notas && React.createElement('p', { className: "text-sm text-gray-500 mt-1" }, `Notas: ${m.notas}`)
+                                ),
+                                canEdit && React.createElement('button', { onClick: () => onDeleteSubRecord('medicion', m.id), className: "p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-100 transition-colors" }, React.createElement(XIcon, { className: "w-4 h-4" }))
+                            )
+                        )) : React.createElement('p', { className: "text-gray-500 text-center p-4" }, "No hay registros de mediciones.")
+                    )
+                )
+            )
+        )
+    );
+};
+
+const AnimalesScreen = ({ animales, onSave, onUpdateAnimal, onDelete, onDeleteSubRecord, currentUser }) => {
+    const [isFormOpen, setIsFormOpen] = React.useState(false);
+    const [editingAnimal, setEditingAnimal] = React.useState(null);
+    const [selectedAnimal, setSelectedAnimal] = React.useState(null);
+    const [searchTerm, setSearchTerm] = React.useState('');
+    const canEdit = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.TECNICO;
+
+    const handleEdit = (animal) => {
+        setEditingAnimal(animal);
+        setIsFormOpen(true);
+    };
+    
+    const handleCloseForm = () => {
+        setIsFormOpen(false);
+        setEditingAnimal(null);
+    };
+
+    const filteredAnimales = React.useMemo(() => 
+        animales.filter(a => 
+            a.nombre.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            a.numeroArete.toLowerCase().includes(searchTerm.toLowerCase())
+        ).sort((a,b) => a.nombre.localeCompare(b.nombre)),
+        [animales, searchTerm]
+    );
+
+    if (selectedAnimal) {
+        const currentAnimalData = animales.find(a => a.id === selectedAnimal.id) || selectedAnimal;
+        return React.createElement(AnimalDetailView, { 
+            animal: currentAnimalData, 
+            onBack: () => setSelectedAnimal(null), 
+            onUpdateAnimal: (updatedAnimal) => {
+                onUpdateAnimal(updatedAnimal);
+                setSelectedAnimal(updatedAnimal);
+            },
+            onDeleteSubRecord: (recordType, recordId) => {
+                 onDeleteSubRecord(selectedAnimal.id, recordType, recordId);
+                 const reloadedAnimal = animales.find(a => a.id === selectedAnimal.id);
+                 if (reloadedAnimal) setSelectedAnimal(reloadedAnimal);
+            },
+            currentUser: currentUser
+        });
+    }
+
+    return (
+        React.createElement('div', null,
+            React.createElement('div', { className: "flex justify-between items-center mb-4" },
+                React.createElement('h1', { className: "text-3xl font-bold text-gray-800" }, "Mi Ganado"),
+                canEdit && React.createElement('button', { onClick: () => setIsFormOpen(true), className: "flex items-center bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-green-800 transition duration-300" },
+                    React.createElement(PlusIcon, { className: "w-5 h-5 mr-2" }), " Agregar Animal"
+                )
+            ),
+             React.createElement('div', { className: "mb-4" },
+                React.createElement(Input, { label: "", placeholder: "Buscar por nombre o arete...", value: searchTerm, onChange: (e) => setSearchTerm(e.target.value)})
+            ),
+            React.createElement(Modal, { isOpen: isFormOpen, onClose: handleCloseForm, title: editingAnimal ? 'Editar Animal' : 'Nuevo Animal' },
+                React.createElement(AnimalForm, { onSave: onSave, initialData: editingAnimal, onClose: handleCloseForm })
+            ),
+            
+            React.createElement('div', { className: "bg-white rounded-lg shadow-md overflow-hidden" },
+                React.createElement('ul', { className: "divide-y divide-gray-200" },
+                    filteredAnimales.length > 0 ? filteredAnimales.map(animal => (
+                        React.createElement('li', { key: animal.id, className: "p-4 hover:bg-gray-50", 
+                            onClick: () => setSelectedAnimal(animal),
+                            role: "button",
+                            tabIndex: 0,
+                            onKeyPress: (e) => e.key === 'Enter' && setSelectedAnimal(animal)
+                        },
+                            React.createElement('div', { className: "flex items-center justify-between" },
+                                React.createElement('div', { className: "flex items-center min-w-0 cursor-pointer flex-grow" },
+                                    animal.imagenUrl ?
+                                      React.createElement('img', { src: animal.imagenUrl, alt: animal.nombre, className: "w-10 h-10 rounded-full mr-4 object-cover flex-shrink-0 bg-gray-200" }) :
+                                      React.createElement('div', { className:"w-10 h-10 rounded-full mr-4 flex-shrink-0 bg-gray-200 flex items-center justify-center" }, React.createElement(CowIcon, { className: "w-6 h-6 text-gray-500" })),
+                                    React.createElement('div', { className: "min-w-0" },
+                                        React.createElement('p', { className: "text-lg font-semibold text-green-800 truncate" }, animal.nombre),
+                                        React.createElement('p', { className: "text-sm text-gray-600" }, `Arete: ${animal.numeroArete} | Tipo: ${animal.tipo}`)
+                                    )
+                                ),
+                                canEdit && React.createElement('div', { className: "flex items-center space-x-4 flex-shrink-0 ml-4" },
+                                    React.createElement('button', { onClick: (e) => { e.stopPropagation(); handleEdit(animal); }, className: "text-sm font-medium text-blue-600 hover:underline" }, "Editar"),
+                                    React.createElement('button', { onClick: (e) => { e.stopPropagation(); onDelete(animal.id); }, className: "text-sm font-medium text-red-600 hover:underline" }, "Eliminar")
+                                )
+                            )
+                        )
+                    )) : (
+                        React.createElement('li', { className: "p-8 text-center text-gray-500" },
+                           "No se encontraron animales. ¡Agrega el primero!"
+                        )
+                    )
+                )
+            )
+        )
+    );
+};
+
+const VentaForm = ({ onSave, onClose }) => {
+    const [venta, setVenta] = React.useState({
+        fecha: new Date().toISOString().split('T')[0],
+        tipo: VentaTipo.LECHE,
+        descripcion: '',
+        monto: '',
+        cantidad: '',
+        precioUnitario: '',
+        subtipoLeche: 'Total'
+    });
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setVenta(prev => ({ ...prev, [name]: value }));
+    };
+
+    React.useEffect(() => {
+        const cantidad = parseFloat(venta.cantidad);
+        const precio = parseFloat(venta.precioUnitario);
+        let descripcion = venta.descripcion;
+
+        if (venta.tipo === VentaTipo.LECHE && !isNaN(cantidad) && !isNaN(precio)) {
+            descripcion = `Venta de ${cantidad} litros de leche`;
+        }
+
+        if (!isNaN(cantidad) && !isNaN(precio)) {
+           setVenta(prev => ({
+                ...prev,
+                monto: (cantidad * precio).toFixed(2),
+                descripcion: descripcion,
+           }));
+        } else if (venta.tipo !== VentaTipo.LECHE && venta.tipo !== VentaTipo.DERIVADOS_LACTEOS) {
+           setVenta(prev => ({ ...prev, monto: prev.monto || ''}));
+        }
+
+    }, [venta.cantidad, venta.precioUnitario, venta.tipo, venta.descripcion]);
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        const finalVenta = { 
+            id: Date.now().toString(),
+            fecha: venta.fecha,
+            tipo: venta.tipo,
+            descripcion: venta.descripcion,
+            monto: parseFloat(venta.monto),
+            cantidad: parseFloat(venta.cantidad) || null,
+            precioUnitario: parseFloat(venta.precioUnitario) || null,
+            subtipoLeche: venta.tipo === VentaTipo.LECHE ? venta.subtipoLeche : null,
+        };
+        
+        onSave(finalVenta);
+        onClose();
+    };
+
+    return (
+        React.createElement('form', { onSubmit: handleSubmit, className: "space-y-4" },
+            React.createElement(Input, { label: "Fecha de Venta", name: "fecha", type: "date", value: venta.fecha, onChange: handleChange, required: true }),
+            React.createElement(Select, { label: "Tipo de Venta", name: "tipo", value: venta.tipo, onChange: handleChange },
+                Object.values(VentaTipo).map(tipo => React.createElement('option', { key: tipo, value: tipo }, tipo))
+            ),
+            
+            venta.tipo === VentaTipo.LECHE && (
+                React.createElement(React.Fragment, null,
+                    React.createElement(Select, { label: "Modalidad de Venta", name: "subtipoLeche", value: venta.subtipoLeche, onChange: handleChange },
+                        React.createElement('option', { value: "Total" }, "Producción Total"),
+                        React.createElement('option', { value: "Raleo" }, "Al Raleo")
+                    ),
+                    React.createElement(Input, { label: "Cantidad (Litros)", name: "cantidad", type: "number", step: "0.1", value: venta.cantidad, onChange: handleChange, required: true }),
+                    React.createElement(Input, { label: "Precio por Litro ($)", name: "precioUnitario", type: "number", step: "0.01", value: venta.precioUnitario, onChange: handleChange, required: true }),
+                    React.createElement(Input, { label: "Monto Total ($)", name: "monto", type: "number", value: venta.monto, readOnly: true, required: true, className: "bg-gray-100" })
+                )
+            ),
+            
+            venta.tipo === VentaTipo.DERIVADOS_LACTEOS && (
+                 React.createElement(React.Fragment, null,
+                    React.createElement(Textarea, { label: "Descripción del Producto (Ej: Queso, Yogurt)", name: "descripcion", value: venta.descripcion, onChange: handleChange, required: true }),
+                    React.createElement(Input, { label: "Cantidad (unidades/kg)", name: "cantidad", type: "number", step: "1", value: venta.cantidad, onChange: handleChange, required: true }),
+                    React.createElement(Input, { label: "Precio Unitario ($)", name: "precioUnitario", type: "number", step: "0.01", value: venta.precioUnitario, onChange: handleChange, required: true }),
+                    React.createElement(Input, { label: "Monto Total ($)", name: "monto", type: "number", value: venta.monto, readOnly: true, required: true, className: "bg-gray-100" })
+                )
+            ),
+
+            (venta.tipo === VentaTipo.ANIMAL || venta.tipo === VentaTipo.OTRO) && (
+                React.createElement(React.Fragment, null,
+                    React.createElement(Textarea, { label: "Descripción", name: "descripcion", value: venta.descripcion, onChange: handleChange, required: true }),
+                    React.createElement(Input, { label: "Monto ($)", name: "monto", type: "number", step: "0.01", value: venta.monto, onChange: handleChange, required: true })
+                )
+            ),
+
+            React.createElement('div', { className: "flex justify-end space-x-2 pt-4" },
+                React.createElement('button', { type: "button", onClick: onClose, className: "px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300" }, "Cancelar"),
+                React.createElement('button', { type: "submit", className: "px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800" }, "Registrar Venta")
+            )
+        )
+    );
+};
+
+const VentasScreen = ({ ventas, onSave, onDelete, currentUser }) => {
+    const [isFormOpen, setIsFormOpen] = React.useState(false);
+    const sortedVentas = React.useMemo(() => [...ventas].sort((a,b) => b.fecha.localeCompare(a.fecha)), [ventas]);
+    const canEdit = currentUser.role === UserRole.ADMIN || currentUser.role === UserRole.VENDEDOR;
+
+    const renderVentaDetails = (venta) => {
+        let descripcionVenta = venta.descripcion;
+        let detallesVenta = [
+            React.createElement('span', { key: 'fecha' }, `${venta.fecha} - `),
+            React.createElement('span', { key: 'tipo', className: "font-medium text-blue-600" }, venta.tipo)
+        ];
+
+        if (venta.tipo === VentaTipo.LECHE && venta.cantidad) {
+            descripcionVenta = `Venta de ${venta.cantidad} Lts de Leche`;
+            detallesVenta.push(React.createElement('span', { key: 'detalle', className: "text-gray-500" }, ` (${venta.subtipoLeche || 'Total'}) @ $${(venta.precioUnitario || 0).toFixed(2)}/Lt`));
+        } else if (venta.tipo === VentaTipo.DERIVADOS_LACTEOS && venta.cantidad) {
+            descripcionVenta = venta.descripcion || 'Venta de Derivado';
+            detallesVenta.push(React.createElement('span', { key: 'detalle', className: "text-gray-500" }, ` (${venta.cantidad} Uds) @ $${(venta.precioUnitario || 0).toFixed(2)}/Ud`));
+        }
+
+        return { descripcionVenta, detallesVenta };
+    };
+
+    return (
+        React.createElement('div', null,
+            React.createElement('div', { className: "flex justify-between items-center mb-4" },
+                React.createElement('h1', { className: "text-3xl font-bold text-gray-800" }, "Registro de Ventas"),
+                canEdit && React.createElement('button', { onClick: () => setIsFormOpen(true), className: "flex items-center bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-green-800 transition duration-300" },
+                    React.createElement(PlusIcon, { className: "w-5 h-5 mr-2" }), " Registrar Venta"
+                )
+            ),
+             React.createElement(Modal, { isOpen: isFormOpen, onClose: () => setIsFormOpen(false), title: "Nueva Venta" },
+                React.createElement(VentaForm, { onSave: onSave, onClose: () => setIsFormOpen(false) })
+            ),
+            React.createElement('div', { className: "bg-white rounded-lg shadow-md overflow-hidden" },
+                React.createElement('ul', { className: "divide-y divide-gray-200" },
+                     sortedVentas.length > 0 ? sortedVentas.map(venta => {
+                        const { descripcionVenta, detallesVenta } = renderVentaDetails(venta);
+                        return React.createElement('li', { key: venta.id, className: "p-4" },
+                            React.createElement('div', { className: "flex items-center justify-between" },
+                                React.createElement('div', null,
+                                    React.createElement('p', { className: "text-lg font-semibold text-gray-800" }, descripcionVenta),
+                                    React.createElement('p', { className: "text-sm text-gray-600" }, detallesVenta)
+                                ),
+                                React.createElement('div', { className: "flex items-center space-x-3" },
+                                    React.createElement('p', { className: "text-lg font-bold text-green-600" }, `$${venta.monto.toFixed(2)}`),
+                                    canEdit && React.createElement('button', { onClick: () => onDelete(venta.id), title: "Eliminar Venta", className: "p-1 text-gray-400 hover:text-red-600 rounded-full hover:bg-red-100 transition-colors" },
+                                        React.createElement(XIcon, { className: "w-5 h-5"})
+                                    )
+                                )
+                            )
+                        );
+                     }) : (
+                         React.createElement('li', { className: "p-8 text-center text-gray-500" },
+                           "No hay ventas registradas."
+                        )
+                     )
+                )
+            )
+        )
+    );
+};
+
+const ReportesScreen = ({ animales, ventas, onImportAnimales }) => {
+
+    const handleExportAnimales = () => {
+        try {
+            const dataStr = JSON.stringify(animales, null, 2);
+            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+            const exportFileDefaultName = 'control_ganadero_animales_backup.json';
+            const linkElement = document.createElement('a');
+            linkElement.setAttribute('href', dataUri);
+            linkElement.setAttribute('download', exportFileDefaultName);
+            document.body.appendChild(linkElement);
+            linkElement.click();
+            document.body.removeChild(linkElement);
+        } catch (error) {
+            console.error("Error exporting animals to JSON:", error);
+            alert("Ocurrió un error al exportar los datos.");
+        }
+    };
+
+    const handleImportAnimalesChange = (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const importedData = JSON.parse(e.target.result);
+                if (Array.isArray(importedData)) {
+                    if (window.confirm("¿Estás seguro de que quieres reemplazar todos los datos de animales con el contenido de este archivo? Esta acción es irreversible y no se puede deshacer.")) {
+                        onImportAnimales(importedData);
+                    }
+                } else {
+                    alert('El archivo no tiene el formato correcto. Debe ser un array de animales.');
+                }
+            } catch (error) {
+                console.error("Error parsing imported JSON:", error);
+                alert('Error al leer el archivo. Asegúrate de que es un archivo JSON válido.');
+            } finally {
+                event.target.value = null;
+            }
+        };
+        reader.readAsText(file);
+    };
+
+
+    return (
+        React.createElement('div', null,
+            React.createElement('h1', { className: "text-3xl font-bold text-gray-800 mb-6" }, "Generar Informes"),
+            React.createElement('div', { className: "grid grid-cols-1 md:grid-cols-2 gap-6" },
+                React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md" },
+                    React.createElement('h2', { className: "text-xl font-semibold text-gray-700 mb-4" }, "Inventario de Ganado"),
+                    React.createElement('p', { className: "text-gray-600 mb-4" }, "Exporta una lista completa de todos tus animales, incluyendo notas para el ICA."),
+                    React.createElement('div', { className: "flex space-x-4" },
+                        React.createElement('button', { onClick: () => reportService.exportarInventarioPDF(animales), className: "bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700" }, "Exportar PDF"),
+                        React.createElement('button', { onClick: () => reportService.exportarInventarioExcel(animales), className: "bg-green-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-700" }, "Exportar Excel")
+                    )
+                ),
+                 React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md" },
+                    React.createElement('h2', { className: "text-xl font-semibold text-gray-700 mb-4" }, "Informe General de Ventas"),
+                     React.createElement('p', { className: "text-gray-600 mb-4" }, "Exporta un registro detallado de todas las ventas."),
+                    React.createElement('div', { className: "flex space-x-4" },
+                        React.createElement('button', { onClick: () => reportService.exportarVentasExcel(ventas), className: "bg-green-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-700" }, "Exportar Excel")
+                    )
+                ),
+                React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md" },
+                    React.createElement('h2', { className: "text-xl font-semibold text-gray-700 mb-4" }, "Informe de Ventas de Leche"),
+                     React.createElement('p', { className: "text-gray-600 mb-4" }, "Exporta un informe exclusivo con las ventas de leche."),
+                    React.createElement('div', { className: "flex space-x-4" },
+                        React.createElement('button', { onClick: () => reportService.exportarVentasLechePDF(ventas), className: "bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700" }, "Exportar PDF")
+                    )
+                ),
+                 React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md" },
+                    React.createElement('h2', { className: "text-xl font-semibold text-gray-700 mb-4" }, "Informe de Ventas de Derivados"),
+                     React.createElement('p', { className: "text-gray-600 mb-4" }, "Exporta un informe exclusivo con las ventas de derivados lácteos."),
+                    React.createElement('div', { className: "flex space-x-4" },
+                        React.createElement('button', { onClick: () => reportService.exportarVentasDerivadosPDF(ventas), className: "bg-red-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-red-700" }, "Exportar PDF")
+                    )
+                ),
+                 React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md md:col-span-2" },
+                    React.createElement('h2', { className: "text-xl font-semibold text-gray-700 mb-4" }, "Base de Datos de Animales"),
+                    React.createElement('p', { className: "text-gray-600 mb-4" }, "Realiza una copia de seguridad (exportar) o restaura (importar) la base de datos completa de animales."),
+                    React.createElement('div', { className: "flex flex-wrap gap-4" },
+                        React.createElement('button', { 
+                            onClick: handleExportAnimales, 
+                            className: "flex items-center bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700" },
+                            React.createElement(DownloadIcon, { className: "w-5 h-5 mr-2"}), "Exportar a JSON"
+                        ),
+                        React.createElement('label', { 
+                            htmlFor: "import-animales", 
+                            className: "flex items-center bg-gray-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-gray-700 cursor-pointer" },
+                            React.createElement(UploadIcon, { className: "w-5 h-5 mr-2"}), "Importar desde JSON"
+                        ),
+                        React.createElement('input', { type: "file", id: "import-animales", className: "hidden", accept: ".json", onChange: handleImportAnimalesChange })
+                    )
+                )
+            )
+        )
+    );
+};
+
+const InventarioForm = ({ onSave, initialData, onClose }) => {
+    const [item, setItem] = React.useState({
+        fecha: new Date().toISOString().split('T')[0],
+        nombre: '',
+        factura: '',
+        cantidad: '',
+        costo: '',
+        notas: '',
+    });
+
+    React.useEffect(() => {
+        if (initialData) {
+            setItem(initialData);
+        }
+    }, [initialData]);
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setItem(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onSave({
+            ...item,
+            id: initialData?.id || Date.now().toString(),
+            cantidad: parseFloat(item.cantidad) || 0,
+            costo: parseFloat(item.costo) || 0,
+        });
+        onClose();
+    };
+
+    return (
+        React.createElement('form', { onSubmit: handleSubmit, className: "space-y-4" },
+            React.createElement(Input, { label: "Fecha de Compra/Ingreso", name: "fecha", type: "date", value: item.fecha, onChange: handleChange, required: true }),
+            React.createElement(Input, { label: "Nombre del Material/Producto", name: "nombre", value: item.nombre, onChange: handleChange, required: true }),
+            React.createElement(Input, { label: "Factura o Referencia", name: "factura", value: item.factura, onChange: handleChange }),
+            React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+                React.createElement(Input, { label: "Cantidad (Uds)", name: "cantidad", type: "number", step: "1", value: item.cantidad, onChange: handleChange, required: true }),
+                React.createElement(Input, { label: "Costo Total ($)", name: "costo", type: "number", step: "0.01", value: item.costo, onChange: handleChange, required: true })
+            ),
+            React.createElement(Textarea, { label: "Notas", name: "notas", value: item.notas, onChange: handleChange }),
+            React.createElement('div', { className: "flex justify-end space-x-2 pt-4" },
+                React.createElement('button', { type: "button", onClick: onClose, className: "px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300" }, "Cancelar"),
+                React.createElement('button', { type: "submit", className: "px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800" }, initialData ? 'Guardar Cambios' : 'Agregar a Inventario')
+            )
+        )
+    );
+};
+
+const InventarioScreen = ({ inventario, onSave, onDelete, currentUser }) => {
+    const [isFormOpen, setIsFormOpen] = React.useState(false);
+    const [editingItem, setEditingItem] = React.useState(null);
+    const sortedInventario = React.useMemo(() => [...inventario].sort((a,b) => b.fecha.localeCompare(a.fecha)), [inventario]);
+
+    const handleEdit = (item) => {
+        setEditingItem(item);
+        setIsFormOpen(true);
+    };
+
+    const handleCloseForm = () => {
+        setIsFormOpen(false);
+        setEditingItem(null);
+    };
+    
+    return (
+      React.createElement('div', null,
+          React.createElement('div', { className: "flex justify-between items-center mb-4 flex-wrap gap-2" },
+              React.createElement('h1', { className: "text-3xl font-bold text-gray-800" }, "Control de Inventario"),
+              React.createElement('div', { className: "flex gap-2" },
+                  React.createElement('button', {
+                      onClick: () => reportService.exportarInventarioMaterialesExcel(sortedInventario),
+                      className: "flex items-center bg-blue-600 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-300"
+                  }, 'Exportar a Excel'),
+                  React.createElement('button', {
+                      onClick: () => { setEditingItem(null); setIsFormOpen(true); },
+                      className: "flex items-center bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-green-800 transition duration-300"
+                  },
+                      React.createElement(PlusIcon, { className: "w-5 h-5 mr-2" }), " Agregar Material"
+                  )
+              )
+          ),
+          React.createElement(Modal, { isOpen: isFormOpen, onClose: handleCloseForm, title: editingItem ? 'Editar Material' : 'Nuevo Material' },
+              React.createElement(InventarioForm, { onSave, initialData: editingItem, onClose: handleCloseForm })
+          ),
+          React.createElement('div', { className: "bg-white rounded-lg shadow-md overflow-x-auto" },
+              React.createElement('table', { className: "w-full text-sm text-left text-gray-500" },
+                  React.createElement('thead', { className: "text-xs text-gray-700 uppercase bg-gray-50" },
+                      React.createElement('tr', null,
+                          React.createElement('th', { scope: "col", className: "px-6 py-3" }, "Fecha"),
+                          React.createElement('th', { scope: "col", className: "px-6 py-3" }, "Material"),
+                          React.createElement('th', { scope: "col", className: "px-6 py-3" }, "Cantidad"),
+                          React.createElement('th', { scope: "col", className: "px-6 py-3" }, "Costo Total"),
+                          React.createElement('th', { scope: "col", className: "px-6 py-3" }, "Costo Unitario"),
+                          React.createElement('th', { scope: "col", className: "px-6 py-3" }, "Acciones")
+                      )
+                  ),
+                  React.createElement('tbody', null,
+                      sortedInventario.length > 0 ? sortedInventario.map(item => (
+                          React.createElement('tr', { key: item.id, className: "bg-white border-b hover:bg-gray-50" },
+                              React.createElement('td', { className: "px-6 py-4 font-medium text-gray-900" }, item.fecha),
+                              React.createElement('td', { className: "px-6 py-4" }, 
+                                React.createElement('div', {className: "font-semibold"}, item.nombre),
+                                item.factura && React.createElement('div', {className: "text-xs text-gray-500"}, `Fact: ${item.factura}`)
+                              ),
+                              React.createElement('td', { className: "px-6 py-4" }, item.cantidad),
+                              React.createElement('td', { className: "px-6 py-4" }, `$${item.costo.toFixed(2)}`),
+                              React.createElement('td', { className: "px-6 py-4" }, item.cantidad > 0 ? `$${(item.costo / item.cantidad).toFixed(2)}` : 'N/A'),
+                              React.createElement('td', { className: "px-6 py-4 flex items-center space-x-3" },
+                                  React.createElement('button', { onClick: () => handleEdit(item), className: "font-medium text-blue-600 hover:underline" }, "Editar"),
+                                  React.createElement('button', { onClick: () => onDelete(item.id), className: "font-medium text-red-600 hover:underline" }, "Eliminar")
+                              )
+                          )
+                      )) : (
+                          React.createElement('tr', null, 
+                            React.createElement('td', { colSpan: 6, className: "text-center p-8 text-gray-500" }, "No hay materiales en el inventario.")
+                          )
+                      )
+                  )
+              )
+          )
+      )
+    );
+};
+
+const UserForm = ({ onSave, initialData, onClose }) => {
+    const [user, setUser] = React.useState({
+        username: '',
+        password: '',
+        role: UserRole.VENDEDOR,
+        nombreCompleto: '',
+        documento: ''
+    });
+    const [isEditing, setIsEditing] = React.useState(false);
+
+    React.useEffect(() => {
+        if (initialData) {
+            setUser({ 
+                ...initialData, 
+                password: '', 
+                nombreCompleto: initialData.nombreCompleto || '',
+                documento: initialData.documento || ''
+            });
+            setIsEditing(true);
+        } else {
+            setUser({ username: '', password: '', role: UserRole.VENDEDOR, nombreCompleto: '', documento: '' });
+            setIsEditing(false);
+        }
+    }, [initialData]);
+
+    const handleChange = (e) => {
+        const { name, value } = e.target;
+        setUser(prev => ({ ...prev, [name]: value }));
+    };
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        if (!user.username || (!user.password && !isEditing)) {
+            alert('El nombre de usuario y la contraseña son obligatorios.');
+            return;
+        }
+        onSave({
+            id: initialData?.id || Date.now().toString(),
+            ...user
+        });
+        onClose();
+    };
+
+    return (
+        React.createElement('form', { onSubmit: handleSubmit, className: "space-y-4" },
+            React.createElement(Input, { label: "Nombre de Usuario", name: "username", value: user.username, onChange: handleChange, required: true, autoComplete: "off" }),
+            React.createElement(Input, { label: `Contraseña ${isEditing ? '(dejar en blanco para no cambiar)' : ''}`, name: "password", type: "password", value: user.password, onChange: handleChange, required: !isEditing, autoComplete: "new-password" }),
+            React.createElement(Select, { label: "Rol de Usuario", name: "role", value: user.role, onChange: handleChange },
+                React.createElement('option', { value: UserRole.VENDEDOR }, "Vendedor"),
+                React.createElement('option', { value: UserRole.TECNICO }, "Técnico")
+            ),
+            user.role === UserRole.TECNICO && (
+                React.createElement(React.Fragment, null,
+                    React.createElement(Input, { label: "Nombre Completo (Técnico)", name: "nombreCompleto", value: user.nombreCompleto, onChange: handleChange, required: true }),
+                    React.createElement(Input, { label: "Documento de Identidad (Técnico)", name: "documento", value: user.documento, onChange: handleChange, required: true })
+                )
+            ),
+            React.createElement('div', { className: "flex justify-end space-x-2 pt-4" },
+                React.createElement('button', { type: "button", onClick: onClose, className: "px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300" }, "Cancelar"),
+                React.createElement('button', { type: "submit", className: "px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800" }, initialData ? 'Guardar Cambios' : 'Crear Usuario')
+            )
+        )
+    );
+};
+
+const PasswordChangeModal = ({ isOpen, onClose, onSave, currentUser }) => {
+    const [step, setStep] = React.useState('questions');
+    const [motherName, setMotherName] = React.useState('');
+    const [dogName, setDogName] = React.useState('');
+    const [newPassword, setNewPassword] = React.useState('');
+    const [error, setError] = React.useState('');
+
+    const handleCheckAnswers = () => {
+        if (motherName.toLowerCase().trim() === 'mercedes' && dogName.toLowerCase().trim() === 'chester') {
+            setStep('passwordForm');
+            setError('');
+        } else {
+            setError('Respuestas incorrectas. Intenta de nuevo.');
+        }
+    };
+
+    const handleSavePassword = () => {
+        if (newPassword.length < 4) {
+            setError('La contraseña debe tener al menos 4 caracteres.');
+            return;
+        }
+        onSave({ ...currentUser, password: newPassword });
+        handleClose();
+    };
+    
+    const handleClose = () => {
+        setStep('questions');
+        setMotherName('');
+        setDogName('');
+        setNewPassword('');
+        setError('');
+        onClose();
+    }
+
+    return (
+        React.createElement(Modal, { isOpen: isOpen, onClose: handleClose, title: "Cambiar Contraseña de Administrador" },
+            step === 'questions' ? (
+                React.createElement('div', { className: "space-y-4" },
+                    React.createElement('p', { className: "text-gray-700" }, "Por seguridad, responde las siguientes preguntas:"),
+                    React.createElement(Input, { label: "Nombre de tu madre:", value: motherName, onChange: e => setMotherName(e.target.value), autoFocus: true }),
+                    React.createElement(Input, { label: "Nombre de tu perro:", value: dogName, onChange: e => setDogName(e.target.value) }),
+                    error && React.createElement('p', { className: "text-red-600 text-sm" }, error),
+                    React.createElement('div', { className: "flex justify-end space-x-2 pt-4" },
+                        React.createElement('button', { type: "button", onClick: handleClose, className: "px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300" }, "Cancelar"),
+                        React.createElement('button', { onClick: handleCheckAnswers, className: "px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800" }, "Verificar")
+                    )
+                )
+            ) : (
+                React.createElement('div', { className: "space-y-4" },
+                    React.createElement('p', { className: "text-gray-700" }, "Verificación exitosa. Ingresa tu nueva contraseña."),
+                    React.createElement(Input, { label: "Nueva Contraseña", type: "password", value: newPassword, onChange: e => setNewPassword(e.target.value), autoFocus: true }),
+                    error && React.createElement('p', { className: "text-red-600 text-sm" }, error),
+                    React.createElement('div', { className: "flex justify-end space-x-2 pt-4" },
+                        React.createElement('button', { type: "button", onClick: handleClose, className: "px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300" }, "Cancelar"),
+                        React.createElement('button', { onClick: handleSavePassword, className: "px-4 py-2 bg-green-700 text-white rounded-md hover:bg-green-800" }, "Guardar Contraseña")
+                    )
+                )
+            )
+        )
+    );
+};
+
+
+const UsuariosScreen = ({ users, onSave, onDelete, currentUser }) => {
+    const [isFormOpen, setIsFormOpen] = React.useState(false);
+    const [editingUser, setEditingUser] = React.useState(null);
+    const [isPasswordModalOpen, setIsPasswordModalOpen] = React.useState(false);
+
+    const handleEdit = (user) => {
+        setEditingUser(user);
+        setIsFormOpen(true);
+    };
+
+    const handleCloseForm = () => {
+        setIsFormOpen(false);
+        setEditingUser(null);
+    };
+
+    return (
+        React.createElement('div', null,
+            React.createElement('div', { className: "flex justify-between items-center mb-4 flex-wrap gap-2" },
+                React.createElement('h1', { className: "text-3xl font-bold text-gray-800" }, "Gestión de Usuarios"),
+                React.createElement('div', { className: "flex gap-2" },
+                    currentUser.role === UserRole.ADMIN && React.createElement('button', { 
+                        onClick: () => setIsPasswordModalOpen(true), 
+                        className: "flex items-center bg-yellow-500 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-yellow-600 transition duration-300" 
+                    }, "Cambiar Mi Contraseña"),
+                    React.createElement('button', { onClick: () => setIsFormOpen(true), className: "flex items-center bg-green-700 text-white font-bold py-2 px-4 rounded-lg shadow-md hover:bg-green-800 transition duration-300" },
+                        React.createElement(PlusIcon, { className: "w-5 h-5 mr-2" }), " Crear Usuario"
+                    )
+                )
+            ),
+            React.createElement(Modal, { isOpen: isFormOpen, onClose: handleCloseForm, title: editingUser ? 'Editar Usuario' : 'Nuevo Usuario' },
+                React.createElement(UserForm, { onSave: onSave, initialData: editingUser, onClose: handleCloseForm })
+            ),
+            React.createElement(PasswordChangeModal, {
+                isOpen: isPasswordModalOpen,
+                onClose: () => setIsPasswordModalOpen(false),
+                onSave: onSave,
+                currentUser: currentUser
+            }),
+            React.createElement('div', { className: "bg-white rounded-lg shadow-md overflow-hidden" },
+                React.createElement('ul', { className: "divide-y divide-gray-200" },
+                    users.length > 0 ? users.map(user => (
+                        React.createElement('li', { key: user.id, className: "p-4" },
+                            React.createElement('div', { className: "flex items-center justify-between" },
+                                React.createElement('div', { className: "flex items-center" },
+                                    React.createElement('div', { className: "w-10 h-10 rounded-full mr-4 bg-gray-200 flex items-center justify-center text-gray-500 font-bold" }, user.username.charAt(0).toUpperCase()),
+                                    React.createElement('div', null,
+                                        React.createElement('p', { className: "text-lg font-semibold text-green-800" }, user.username),
+                                        React.createElement('p', { className: "text-sm text-gray-600" }, `Rol: ${user.role}`),
+                                        user.role === UserRole.TECNICO && user.nombreCompleto && React.createElement('p', { className: "text-sm text-gray-500" }, user.nombreCompleto)
+                                    )
+                                ),
+                                user.id !== currentUser.id && user.role !== UserRole.ADMIN && (
+                                    React.createElement('div', { className: "flex items-center space-x-4" },
+                                        React.createElement('button', { onClick: () => handleEdit(user), className: "text-sm font-medium text-blue-600 hover:underline" }, "Editar"),
+                                        React.createElement('button', { onClick: () => onDelete(user.id), className: "text-sm font-medium text-red-600 hover:underline" }, "Eliminar")
+                                    )
+                                )
+                            )
+                        )
+                    )) : (
+                        React.createElement('li', { className: "p-8 text-center text-gray-500" },
+                            "No hay usuarios registrados. Cree el primero."
+                        )
+                    )
+                )
+            )
+        )
+    );
+};
+
+
+const AyudaScreen = ({currentUser}) => {
+    const AyudaSection = ({ title, children, requiredRoles }) => {
+        if (requiredRoles && !requiredRoles.includes(currentUser.role)) {
+            return null;
+        }
+        return (
+            React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md mb-6" },
+                React.createElement('h2', { className: "text-2xl font-bold text-green-800 mb-4 border-b-2 border-green-200 pb-2" }, title),
+                React.createElement('div', { className: "space-y-4 text-gray-700 leading-relaxed" }, children)
+            )
+        );
+    }
+
+    return (
+        React.createElement('div', null,
+            React.createElement('h1', { className: "text-3xl font-bold text-gray-800 mb-6" }, "Manual de Usuario"),
+            React.createElement(AyudaSection, { title: "Roles de Usuario y Permisos", requiredRoles: [UserRole.ADMIN, UserRole.TECNICO, UserRole.VENDEDOR] },
+                 React.createElement('p', null, `Has iniciado sesión como `, React.createElement('strong', null, currentUser.role), `.`),
+                 React.createElement('ul', { className: 'list-disc list-inside space-y-2 mt-2' },
+                    React.createElement('li', null, React.createElement('strong', null, "Administrador:"), " Acceso total a todas las funciones, incluyendo gestión de usuarios, animales, ventas, reportes e inventario."),
+                    React.createElement('li', null, React.createElement('strong', null, "Técnico:"), " Puede gestionar animales (crear, editar, registrar salud), ver el panel y gestionar el inventario. No tiene acceso a ventas, reportes ni usuarios."),
+                    React.createElement('li', null, React.createElement('strong', null, "Vendedor:"), " Puede ver el panel y registrar ventas. No tiene acceso a animales, reportes, inventario ni usuarios.")
+                ),
+            ),
+             React.createElement(AyudaSection, { title: "Gestión de Inventario", requiredRoles: [UserRole.ADMIN, UserRole.TECNICO] },
+                React.createElement('p', null, "Registra y controla los materiales que ingresan a la finca, como alimentos, medicinas o herramientas."),
+                React.createElement('ul', { className: 'list-disc list-inside space-y-2' },
+                    React.createElement('li', null, React.createElement('strong', null, "Agregar Material:"), " Usa el botón 'Agregar Material'. Completa los campos como nombre, fecha, cantidad y costo total."),
+                    React.createElement('li', null, React.createElement('strong', null, "Exportar a Excel:"), " Genera un archivo de Excel con todo el inventario, incluyendo costos unitarios calculados automáticamente."),
+                    React.createElement('li', null, React.createElement('strong', null, "Editar y Eliminar:"), " Puedes modificar los datos de un registro o eliminarlo de la lista.")
+                )
+            ),
+            React.createElement(AyudaSection, { title: "Gestión de Animales (Mi Ganado)", requiredRoles: [UserRole.ADMIN, UserRole.TECNICO] },
+                React.createElement('p', null, "Esta sección te permite gestionar el inventario de tus animales."),
+                React.createElement('ul', { className: 'list-disc list-inside space-y-2' },
+                    React.createElement('li', null, React.createElement('strong', null, "Agregar y Editar:"), " Administradores y Técnicos pueden crear nuevos animales y editar todos los datos de los existentes."),
+                    React.createElement('li', null, React.createElement('strong', null, "Generar Reporte PDF:"), " En la vista de detalle de un animal, puedes generar un PDF con todas sus novedades (vacunas, tratamientos, etc.). Este botón ya ha sido reparado.")
+                )
+            ),
+            React.createElement(AyudaSection, { title: "Generación de Reportes", requiredRoles: [UserRole.ADMIN] },
+                React.createElement('p', null, "Exporta tus datos en formatos PDF y Excel para análisis o auditorías. Todos los botones de exportación han sido revisados y funcionan correctamente."),
+                React.createElement('ul', { className: 'list-disc list-inside space-y-2' },
+                    React.createElement('li', null, React.createElement('strong', null, "Copia de Seguridad (Animales):"), " Usa los botones 'Exportar a JSON' para guardar una copia de seguridad y 'Importar desde JSON' para restaurarla.")
+                )
+            ),
+        )
+    );
+};
+
+const Dashboard = ({ animales, ventas }) => {
+    const totalIngresos = React.useMemo(() => ventas.reduce((sum, v) => sum + v.monto, 0), [ventas]);
+    
+    const ventasLeche = React.useMemo(() => ventas.filter(v => v.tipo === VentaTipo.LECHE), [ventas]);
+    const totalLitros = React.useMemo(() => ventasLeche.reduce((sum, v) => sum + (v.cantidad || 0), 0), [ventasLeche]);
+    const totalIngresosLeche = React.useMemo(() => ventasLeche.reduce((sum, v) => sum + v.monto, 0), [ventasLeche]);
+    
+    const ventasDerivados = React.useMemo(() => ventas.filter(v => v.tipo === VentaTipo.DERIVADOS_LACTEOS), [ventas]);
+    const totalIngresosDerivados = React.useMemo(() => ventasDerivados.reduce((sum, v) => sum + v.monto, 0), [ventasDerivados]);
+
+    const animalesPorTipo = React.useMemo(() => {
+        return animales.reduce((acc, animal) => {
+            acc[animal.tipo] = (acc[animal.tipo] || 0) + 1;
+            return acc;
+        }, {});
+    }, [animales]);
+
+    const vacunasProximas = React.useMemo(() => {
+        const hoy = new Date();
+        const limite = new Date();
+        limite.setDate(hoy.getDate() + 30);
+        
+        const alertas = [];
+        animales.forEach(animal => {
+            (animal.vacunas || []).forEach(vacuna => {
+                if (vacuna.proximaDosis) {
+                    const fechaProxima = new Date(vacuna.proximaDosis);
+                    if (fechaProxima >= hoy && fechaProxima <= limite) {
+                        alertas.push({ 
+                            animalId: animal.id,
+                            animalNombre: animal.nombre,
+                            vacunaTipo: vacuna.tipo,
+                            proximaDosis: vacuna.proximaDosis,
+                        });
+                    }
+                }
+            });
+        });
+        return alertas.sort((a, b) => new Date(a.proximaDosis).getTime() - new Date(b.proximaDosis).getTime());
+    }, [animales]);
+    
+    return (
+         React.createElement('div', { className: "space-y-8" },
+            React.createElement('h1', { className: "text-3xl font-bold text-gray-800" }, "Panel de Control"),
+            
+            React.createElement('div', { className: "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6" },
+                React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md flex items-center" },
+                    React.createElement(CowIcon, { className: "w-12 h-12 text-green-600 mr-4"}),
+                    React.createElement('div', null,
+                        React.createElement('p', { className: "text-sm text-gray-500" }, "Total de Animales"),
+                        React.createElement('p', { className: "text-3xl font-bold text-gray-800" }, animales.length)
+                    )
+                ),
+                React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md flex items-center col-span-1 sm:col-span-2 xl:col-span-1" },
+                    React.createElement(DollarSignIcon, { className: "w-12 h-12 text-green-600 mr-4"}),
+                    React.createElement('div', null,
+                        React.createElement('p', { className: "text-sm text-gray-500" }, "Ingresos Totales"),
+                        React.createElement('p', { className: "text-3xl font-bold text-gray-800" }, `$${totalIngresos.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+                    )
+                ),
+                React.createElement('div', { className: `p-6 rounded-lg shadow-md ${vacunasProximas.length > 0 ? 'bg-yellow-100' : 'bg-white'}` },
+                    React.createElement('div', { className: "flex items-start" },
+                        React.createElement(SyringeIcon, { className: `w-12 h-12 mr-4 flex-shrink-0 ${vacunasProximas.length > 0 ? 'text-yellow-600' : 'text-green-600'}`}),
+                        React.createElement('div', { className: "w-full" },
+                            React.createElement('p', { className: `text-sm font-semibold ${vacunasProximas.length > 0 ? 'text-yellow-700' : 'text-gray-500'}` }, "Alerta de Vacunación"),
+                            React.createElement('p', { className: "text-sm text-gray-600 mb-1" }, "(Próximos 30 días)"),
+                            vacunasProximas.length > 0 ? (
+                                React.createElement('ul', { className: "mt-2 space-y-1 text-sm max-h-24 overflow-y-auto" },
+                                    vacunasProximas.slice(0, 3).map(v => (
+                                        React.createElement('li', { key: v.animalId + v.proximaDosis, className: "text-yellow-800" },
+                                            React.createElement('strong', null, v.animalNombre, ":"), ` ${v.vacunaTipo} (${v.proximaDosis})`
+                                        )
+                                    )),
+                                    vacunasProximas.length > 3 && (
+                                        React.createElement('li', { className: "text-yellow-800 font-medium" }, "y ", vacunasProximas.length - 3, " más...")
+                                    )
+                                )
+                            ) : (
+                                React.createElement('p', { className: "text-xl font-bold text-gray-800 mt-2" }, "Ninguna pendiente")
+                            )
+                        )
+                    )
+                )
+            ),
+
+            React.createElement('div', { className: "grid grid-cols-1 lg:grid-cols-3 gap-6" },
+                React.createElement('div', { className: "lg:col-span-2 bg-white p-6 rounded-lg shadow-md" },
+                     React.createElement('h2', { className: "text-xl font-semibold text-gray-700 mb-4" }, "Resumen de Producción"),
+                     React.createElement('div', {className: 'grid grid-cols-1 md:grid-cols-2 gap-4'}, 
+                        React.createElement('div', { className: "bg-blue-50 p-4 rounded-lg flex items-center" },
+                            React.createElement(DropletIcon, { className: "w-10 h-10 text-blue-500 mr-4 flex-shrink-0"}),
+                            React.createElement('div', null,
+                                React.createElement('p', { className: "text-sm text-blue-800 font-semibold" }, `Leche Vendida`),
+                                React.createElement('p', { className: "text-gray-600" }, `${totalLitros.toLocaleString('es-CO')} Lts`),
+                                React.createElement('p', { className: "text-2xl font-bold text-blue-900" }, `$${totalIngresosLeche.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+                            )
+                        ),
+                        React.createElement('div', { className: "bg-yellow-50 p-4 rounded-lg flex items-center" },
+                            React.createElement(CheeseIcon, { className: "w-10 h-10 text-yellow-500 mr-4 flex-shrink-0"}),
+                            React.createElement('div', null,
+                                React.createElement('p', { className: "text-sm text-yellow-800 font-semibold" }, `Derivados Vendidos`),
+                                React.createElement('p', { className: "text-gray-600" }, `${ventasDerivados.length} transacciones`),
+                                React.createElement('p', { className: "text-2xl font-bold text-yellow-900" }, `$${totalIngresosDerivados.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
+                            )
+                        )
+                    )
+                ),
+                 React.createElement('div', { className: "bg-white p-6 rounded-lg shadow-md" },
+                     React.createElement('h2', { className: "text-xl font-semibold text-gray-700 mb-4" }, "Ganado por Tipo"),
+                     Object.keys(animalesPorTipo).length > 0 ? (
+                        React.createElement('div', { className: "grid grid-cols-2 gap-4" },
+                            Object.entries(animalesPorTipo).map(([tipo, count]) => (
+                                React.createElement('div', { key: tipo, className: "bg-gray-50 p-3 rounded-lg text-center" },
+                                    React.createElement('p', { className: "font-semibold text-gray-700 text-sm" }, tipo),
+                                    React.createElement('p', { className: "text-2xl font-bold text-green-700" }, count)
+                                )
+                            ))
+                        )
+                     ) : (
+                        React.createElement('p', { className: "text-center text-gray-500 py-4" }, "No hay animales registrados.")
+                     )
+                )
+            )
+        )
+    )
+}
+
+const LoginScreen = ({ onLogin, error }) => {
+    const [username, setUsername] = React.useState('');
+    const [password, setPassword] = React.useState('');
+
+    const handleSubmit = (e) => {
+        e.preventDefault();
+        onLogin(username, password);
+    };
+
+    return (
+        React.createElement('div', { className: "flex items-center justify-center min-h-screen bg-gray-100" },
+            React.createElement('div', { className: "p-8 max-w-sm w-full bg-white rounded-lg shadow-xl" },
+                React.createElement('div', { className: "flex justify-center mb-6" },
+                    React.createElement(CowIcon, { className: "w-16 h-16 text-green-700" })
+                ),
+                React.createElement('h2', { className: "text-2xl font-bold text-center text-gray-800 mb-2" }, "Control Ganadero Pro"),
+                React.createElement('p', { className: "text-center text-gray-600 mb-6" }, "Iniciar Sesión"),
+                error && React.createElement('p', { className: "bg-red-100 text-red-700 p-3 rounded-md mb-4 text-sm text-center" }, error),
+                React.createElement('form', { onSubmit: handleSubmit, className: "space-y-4" },
+                    React.createElement(Input, { label: "Usuario", name: "username", value: username, onChange: (e) => setUsername(e.target.value), required: true, autoComplete: "username" }),
+                    React.createElement(Input, { label: "Contraseña", name: "password", type: "password", value: password, onChange: (e) => setPassword(e.target.value), required: true, autoComplete: "current-password" }),
+                    React.createElement('button', { type: "submit", className: "w-full py-2 px-4 bg-green-700 text-white font-semibold rounded-md hover:bg-green-800 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500" }, "Ingresar")
+                ),
+                React.createElement('div', { className: "mt-8 text-center text-xs text-gray-500" },
+                    React.createElement('p', null, "Copyrigth: Victor Hugo Riascos"),
+                    React.createElement('p', null, "Wassap: 3156614913")
+                )
+            )
+        )
+    );
+};
+
+
+const App = () => {
+  const [page, setPage] = React.useState(Page.DASHBOARD);
+  const [animales, setAnimales] = React.useState([]);
+  const [ventas, setVentas] = React.useState([]);
+  const [inventario, setInventario] = React.useState([]);
+  const [users, setUsers] = React.useState([]);
+  const [currentUser, setCurrentUser] = React.useState(null);
+  const [loading, setLoading] = React.useState(true);
+  const [authLoading, setAuthLoading] = React.useState(true);
+  const [loginError, setLoginError] = React.useState('');
+  const [toastMessage, setToastMessage] = React.useState(null);
+  const [itemToDelete, setItemToDelete] = React.useState(null);
+  const [isExpired, setIsExpired] = React.useState(false);
+  
+  // App initialization
+  React.useEffect(() => {
+    const initApp = async () => {
+        // Check license expiration
+        const expirationDate = new Date('2025-12-10T23:59:59');
+        if (new Date() > expirationDate) {
+            setIsExpired(true);
+            setAuthLoading(false);
+            return;
+        }
+
+        // Load users and create default admin if none exist
+        let loadedUsers = await storageService.getUsers();
+        if (loadedUsers.length === 0) {
+            const adminUser = { id: 'admin_user', username: 'admin', password: 'admin', role: UserRole.ADMIN, nombreCompleto: 'Administrador Principal', documento: '' };
+            loadedUsers = [adminUser];
+            await storageService.saveUsers(loadedUsers);
+        }
+        setUsers(loadedUsers);
+        
+        // Check for active session
+        const sessionUser = storageService.getSession();
+        if (sessionUser) {
+            const userInDb = loadedUsers.find(u => u.id === sessionUser.id && u.username === sessionUser.username);
+            if (userInDb) {
+                setCurrentUser(userInDb);
+            }
+        }
+        setAuthLoading(false);
+    };
+    initApp();
+  }, []);
+
+  // Data loading after login
+  React.useEffect(() => {
+    const loadData = async () => {
+      if (currentUser) {
+        setLoading(true);
+        const [loadedAnimales, loadedVentas, loadedInventario] = await Promise.all([
+          storageService.getAnimales(),
+          storageService.getVentas(),
+          storageService.getInventario()
+        ]);
+        setAnimales(loadedAnimales.map(a => ({
+            ...a, vacunas: a.vacunas || [], tratamientos: a.tratamientos || [], mediciones: a.mediciones || []
+        })));
+        setVentas(loadedVentas);
+        setInventario(loadedInventario);
+        setLoading(false);
+      }
+    };
+    loadData();
+  }, [currentUser]);
+  
+  const handleShowToast = (message) => {
+    setToastMessage(message);
+  };
+  
+  // --- AUTH HANDLERS ---
+  const handleLogin = (username, password) => {
+    const user = users.find(u => u.username === username && u.password === password);
+    if (user) {
+        setCurrentUser(user);
+        storageService.saveSession(user);
+        setLoginError('');
+    } else {
+        setLoginError('Usuario o contraseña incorrectos.');
+    }
+  };
+
+  const handleLogout = () => {
+    if (window.confirm('¿Estás seguro de que quieres cerrar la sesión?')) {
+        setCurrentUser(null);
+        storageService.clearSession();
+        setPage(Page.DASHBOARD);
+    }
+  };
+
+  // --- CRUD Handlers ---
+  const handleSaveUser = React.useCallback(async (user) => {
+    const exists = users.some(u => u.id === user.id);
+    let updatedUsers;
+    if (exists) {
+        updatedUsers = users.map(u => u.id === user.id ? { ...u, ...user, password: user.password || u.password } : u);
+    } else {
+        updatedUsers = [...users, user];
+    }
+    setUsers(updatedUsers);
+    await storageService.saveUsers(updatedUsers);
+    handleShowToast(`Usuario ${exists ? 'actualizado' : 'creado'} con éxito.`);
+
+    if(user.id === currentUser?.id) {
+        const updatedCurrentUser = updatedUsers.find(u => u.id === currentUser.id);
+        if (updatedCurrentUser) {
+            setCurrentUser(updatedCurrentUser);
+            storageService.saveSession(updatedCurrentUser);
+        }
+    }
+  }, [users, currentUser]);
+  
+  const handleDeleteUser = React.useCallback(async (userId) => {
+      if (userId === currentUser?.id) {
+          alert("No puedes eliminar tu propia cuenta.");
+          return;
+      }
+      const userToDelete = users.find(u => u.id === userId);
+      if (userToDelete && userToDelete.role === UserRole.ADMIN) {
+          alert("No se puede eliminar a un usuario Administrador.");
+          setItemToDelete(null);
+          return;
+      }
+      const updatedUsers = users.filter(u => u.id !== userId);
+      setUsers(updatedUsers);
+      await storageService.saveUsers(updatedUsers);
+      handleShowToast('Usuario eliminado con éxito.');
+      setItemToDelete(null);
+  }, [users, currentUser]);
+
+  const handleSaveAnimal = React.useCallback(async (animal) => {
+    const exists = animales.some(a => a.id === animal.id);
+    const updatedAnimales = exists 
+        ? animales.map(a => a.id === animal.id ? animal : a)
+        : [...animales, animal];
+    setAnimales(updatedAnimales);
+    await storageService.saveAnimales(updatedAnimales);
+    handleShowToast(`Animal ${exists ? 'actualizado' : 'guardado'} con éxito.`);
+  }, [animales]);
+
+  const handleUpdateAnimalRecords = React.useCallback(async (updatedAnimal) => {
+      const updatedAnimales = animales.map(a => a.id === updatedAnimal.id ? updatedAnimal : a);
+      setAnimales(updatedAnimales);
+      await storageService.saveAnimales(updatedAnimales);
+      handleShowToast('Registro actualizado.');
+  }, [animales]);
+  
+  const handleImportAnimales = React.useCallback(async (importedAnimales) => {
+    const sanitizedAnimales = importedAnimales.map(a => ({
+        ...a,
+        vacunas: a.vacunas || [],
+        tratamientos: a.tratamientos || [],
+        mediciones: a.mediciones || [],
+    }));
+    setAnimales(sanitizedAnimales);
+    await storageService.saveAnimales(sanitizedAnimales);
+    handleShowToast('Base de datos de animales importada con éxito.');
+  }, []);
+
+  const handleSaveVenta = React.useCallback(async (venta) => {
+    const updatedVentas = [...ventas, venta];
+    setVentas(updatedVentas);
+    await storageService.saveVentas(updatedVentas);
+    handleShowToast('Venta registrada con éxito.');
+  }, [ventas]);
+
+  const handleDeleteAnimal = React.useCallback(async (animalId) => {
+    const updatedAnimales = animales.filter(a => a.id !== animalId);
+    setAnimales(updatedAnimales);
+    await storageService.saveAnimales(updatedAnimales);
+    handleShowToast('Animal eliminado con éxito.');
+    setItemToDelete(null);
+  }, [animales]);
+
+  const handleDeleteVenta = React.useCallback(async (ventaId) => {
+    const updatedVentas = ventas.filter(v => v.id !== ventaId);
+    setVentas(updatedVentas);
+    await storageService.saveVentas(updatedVentas);
+    handleShowToast('Venta eliminada con éxito.');
+    setItemToDelete(null);
+  }, [ventas]);
+
+  const handleSaveInventario = React.useCallback(async (item) => {
+    const exists = inventario.some(i => i.id === item.id);
+    const updatedInventario = exists
+      ? inventario.map(i => i.id === item.id ? item : i)
+      : [...inventario, item];
+    setInventario(updatedInventario);
+    await storageService.saveInventario(updatedInventario);
+    handleShowToast(`Ítem de inventario ${exists ? 'actualizado' : 'guardado'} con éxito.`);
+  }, [inventario]);
+
+  const handleDeleteInventario = React.useCallback(async (itemId) => {
+    const updatedInventario = inventario.filter(i => i.id !== itemId);
+    setInventario(updatedInventario);
+    await storageService.saveInventario(updatedInventario);
+    handleShowToast('Ítem de inventario eliminado con éxito.');
+    setItemToDelete(null);
+  }, [inventario]);
+
+  const handleDeleteAnimalSubRecord = React.useCallback(async (animalId, recordType, recordId) => {
+    if (!window.confirm('¿Estás seguro de que quieres eliminar este registro? La acción no se puede deshacer.')) {
+        return;
+    }
+    const animalToUpdate = animales.find(a => a.id === animalId);
+    if (!animalToUpdate) return;
+    
+    let updatedAnimal = { ...animalToUpdate };
+    switch (recordType) {
+        case 'vacuna': updatedAnimal.vacunas = animalToUpdate.vacunas.filter(r => r.id !== recordId); break;
+        case 'tratamiento': updatedAnimal.tratamientos = animalToUpdate.tratamientos.filter(r => r.id !== recordId); break;
+        case 'medicion': updatedAnimal.mediciones = animalToUpdate.mediciones.filter(r => r.id !== recordId); break;
+        default: return;
+    }
+    const updatedAnimales = animales.map(a => a.id === animalId ? updatedAnimal : a);
+    setAnimales(updatedAnimales);
+    await storageService.saveAnimales(updatedAnimales);
+    handleShowToast('Registro eliminado con éxito.');
+  }, [animales]);
+
+  const renderPage = () => {
+    if (loading) {
+      return React.createElement('div', { className: "text-center p-10" }, "Cargando datos...");
+    }
+    
+    const pagePermissions = {
+        [Page.DASHBOARD]: [UserRole.ADMIN, UserRole.TECNICO, UserRole.VENDEDOR],
+        [Page.ANIMALES]: [UserRole.ADMIN, UserRole.TECNICO],
+        [Page.VENTAS]: [UserRole.ADMIN, UserRole.VENDEDOR],
+        [Page.REPORTES]: [UserRole.ADMIN],
+        [Page.INVENTARIO]: [UserRole.ADMIN, UserRole.TECNICO],
+        [Page.USUARIOS]: [UserRole.ADMIN],
+        [Page.AYUDA]: [UserRole.ADMIN, UserRole.TECNICO, UserRole.VENDEDOR]
+    };
+
+    if (!pagePermissions[page] || !pagePermissions[page].includes(currentUser.role)) {
+        // Fallback to Dashboard if user tries to access a restricted page
+        return React.createElement(Dashboard, { animales, ventas });
+    }
+
+    switch (page) {
+      case Page.DASHBOARD: return React.createElement(Dashboard, { animales, ventas });
+      case Page.ANIMALES: return React.createElement(AnimalesScreen, { animales, onSave: handleSaveAnimal, onUpdateAnimal: handleUpdateAnimalRecords, onDelete: (id) => setItemToDelete({ type: 'animal', id }), onDeleteSubRecord: handleDeleteAnimalSubRecord, currentUser });
+      case Page.VENTAS: return React.createElement(VentasScreen, { ventas, onSave: handleSaveVenta, onDelete: (id) => setItemToDelete({ type: 'venta', id }), currentUser });
+      case Page.REPORTES: return React.createElement(ReportesScreen, { animales, ventas, onImportAnimales: handleImportAnimales });
+      case Page.INVENTARIO: return React.createElement(InventarioScreen, { inventario, onSave: handleSaveInventario, onDelete: (id) => setItemToDelete({ type: 'inventario', id }), currentUser });
+      case Page.USUARIOS: return React.createElement(UsuariosScreen, { users, onSave: handleSaveUser, onDelete: (id) => setItemToDelete({ type: 'user', id }), currentUser });
+      case Page.AYUDA: return React.createElement(AyudaScreen, {currentUser});
+      default: return React.createElement(Dashboard, { animales, ventas });
+    }
+  };
+
+  const NavItem = ({ icon, label, requiredRoles }) => {
+    if (requiredRoles && !requiredRoles.includes(currentUser?.role)) {
+        return null;
+    }
+    const isActive = page === label;
+    return (
+        React.createElement('li', {
+            onClick: () => setPage(label),
+            className: `flex items-center p-3 my-1 rounded-lg cursor-pointer transition-colors ${
+            isActive ? 'bg-green-700 text-white' : 'text-gray-300 hover:bg-green-800 hover:text-white'
+            }`
+          },
+            icon,
+            React.createElement('span', { className: "ml-3 font-medium" }, label)
+        )
+    );
+  };
+  
+  if (authLoading) {
+    return React.createElement('div', { className: "flex justify-center items-center h-screen" }, "Inicializando...");
+  }
+
+  if (isExpired) {
+    return (
+        React.createElement('div', { className: "fixed inset-0 bg-red-900 text-white flex flex-col justify-center items-center text-center p-4 z-50" },
+            React.createElement('h1', { className: "text-4xl font-bold mb-4" }, "Licencia Expirada"),
+            React.createElement('p', { className: "text-lg" }, "Esta versión de Control Ganadero Pro ha expirado el 10 de Diciembre de 2025."),
+            React.createElement('p', { className: "text-lg mt-2" }, "Por favor, contacte al desarrollador para obtener una nueva versión.")
+        )
+    );
+  }
+
+  if (!currentUser) {
+    return React.createElement(LoginScreen, { onLogin: handleLogin, error: loginError });
+  }
+
+  return (
+    React.createElement('div', { className: "flex h-screen bg-gray-100 font-sans" },
+        toastMessage && React.createElement(Toast, { message: toastMessage, onDismiss: () => setToastMessage(null) }),
+        React.createElement('aside', { className: "w-64 bg-green-900 text-white flex-col p-4 hidden md:flex" },
+             React.createElement('div', { className: 'flex-grow flex flex-col' },
+                React.createElement('div', { className: "flex items-center mb-6 flex-shrink-0" },
+                    React.createElement(CowIcon, { className: "w-10 h-10 text-green-300"}),
+                    React.createElement('div', { className: "ml-2" },
+                       React.createElement('h1', { className: "text-2xl font-bold" }, "GanaderoPro"),
+                       React.createElement('p', { className: "text-xs text-green-200" }, "Usuario: ", currentUser.username)
+                    )
+                ),
+                React.createElement('nav', { className: "flex-grow" },
+                    React.createElement('ul', null,
+                        React.createElement(NavItem, { icon: React.createElement(HomeIcon, { className: "w-6 h-6" }), label: Page.DASHBOARD, requiredRoles: [UserRole.ADMIN, UserRole.TECNICO, UserRole.VENDEDOR] }),
+                        React.createElement(NavItem, { icon: React.createElement(CowIcon, { className: "w-6 h-6" }), label: Page.ANIMALES, requiredRoles: [UserRole.ADMIN, UserRole.TECNICO] }),
+                        React.createElement(NavItem, { icon: React.createElement(DollarSignIcon, { className: "w-6 h-6" }), label: Page.VENTAS, requiredRoles: [UserRole.ADMIN, UserRole.VENDEDOR] }),
+                        React.createElement(NavItem, { icon: React.createElement(FileTextIcon, { className: "w-6 h-6" }), label: Page.REPORTES, requiredRoles: [UserRole.ADMIN] }),
+                        React.createElement(NavItem, { icon: React.createElement(BoxIcon, { className: "w-6 h-6" }), label: Page.INVENTARIO, requiredRoles: [UserRole.ADMIN, UserRole.TECNICO] }),
+                        React.createElement(NavItem, { icon: React.createElement(UsersIcon, { className: "w-6 h-6" }), label: Page.USUARIOS, requiredRoles: [UserRole.ADMIN] }),
+                        React.createElement(NavItem, { icon: React.createElement(HelpCircleIcon, { className: "w-6 h-6" }), label: Page.AYUDA, requiredRoles: [UserRole.ADMIN, UserRole.TECNICO, UserRole.VENDEDOR] })
+                    )
+                ),
+                React.createElement('div', { className: 'mt-auto flex-shrink-0' },
+                    React.createElement('button', {
+                        onClick: handleLogout,
+                        className: 'flex items-center p-3 my-1 rounded-lg cursor-pointer transition-colors text-gray-300 hover:bg-red-800 hover:text-white w-full'
+                    },
+                        React.createElement(LogOutIcon, { className: 'w-6 h-6' }),
+                        React.createElement('span', { className: 'ml-3 font-medium' }, 'Cerrar Sesión')
+                    )
+                )
+             )
+        ),
+        
+        React.createElement('main', { className: "flex-1 p-6 lg:p-8 overflow-y-auto" },
+            renderPage()
+        ),
+        
+        React.createElement(Modal, {
+            isOpen: !!itemToDelete,
+            onClose: () => setItemToDelete(null),
+            title: "Confirmar Eliminación"
+          },
+            React.createElement('div', null,
+                React.createElement('p', { className: "text-gray-700" }, "¿Estás seguro de que deseas eliminar este elemento? Esta acción no se puede deshacer."),
+                React.createElement('div', { className: "flex justify-end space-x-4 pt-6" },
+                React.createElement('button', { type: "button", onClick: () => setItemToDelete(null), className: "px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 font-semibold" }, "Cancelar"),
+                React.createElement('button', { 
+                    type: "button", 
+                    onClick: () => {
+                        if (!itemToDelete) return;
+                        if (itemToDelete.type === 'animal') handleDeleteAnimal(itemToDelete.id);
+                        else if (itemToDelete.type === 'venta') handleDeleteVenta(itemToDelete.id);
+                        else if (itemToDelete.type === 'user') handleDeleteUser(itemToDelete.id);
+                        else if (itemToDelete.type === 'inventario') handleDeleteInventario(itemToDelete.id);
+                    },
+                    className: "px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 font-semibold" },
+                    "Eliminar"
+                )
+                )
+            )
+        )
+    )
+  );
+};
+
+// --- index.tsx (Render logic) ---
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error("No se pudo encontrar el elemento raíz para montar la aplicación.");
+}
+
+const root = ReactDOM.createRoot(rootElement);
+root.render(
+  React.createElement(React.StrictMode, null,
+    React.createElement(App, null)
+  )
+);
+
+// =======================================================
+// FIN: CÓDIGO DE LA APLICACIÓN INTEGRADO
+// =======================================================
+    </script>
+  </body>
+</html>
